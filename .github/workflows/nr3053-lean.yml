@@ -1,0 +1,78 @@
+name: NR3053 Lean (firmware only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      NR3053_LEAN: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Reclaim disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+      - name: Dependencies
+        run: bash scripts/install-deps.sh
+      - name: Prepare and verify
+        run: |
+          bash scripts/prepare-build.sh defconfig/nr3053-lean.config
+          bash scripts/verify-nr3053-lean.sh .config
+          cp .config nr3053-resolved.config
+          ./scripts/diffconfig.sh > nr3053-diffconfig.txt
+      - name: Download
+        run: make download -j4
+      - name: Compile
+        run: |
+          set -o pipefail
+          make -j2 V=s 2>&1 | tee build.log
+      - name: Audit firmware output
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=bin/targets/mediatek/filogic
+          mapfile -t images < <(find "$dir" -maxdepth 1 -type f -name '*viettel_nr3053*sysupgrade.itb' | sort)
+          if [ "${#images[@]}" -ne 1 ]; then
+            echo "Expected exactly one viettel_nr3053 sysupgrade.itb, found ${#images[@]}" >&2
+            ls -lah "$dir"
+            exit 1
+          fi
+          test -s "${images[0]}"
+          sha256sum "${images[0]}" > nr3053-lean-sha256sums.txt
+          mapfile -t manifests < <(find "$dir" -maxdepth 1 -type f -name '*viettel_nr3053*.manifest' | sort)
+          if [ "${#manifests[@]}" -ne 1 ]; then
+            echo "Expected one per-device manifest; found ${#manifests[@]}" >&2
+            ls -lah "$dir"
+            exit 1
+          fi
+          cp "${manifests[0]}" nr3053-package-manifest.txt
+          if grep -Eq '^(tailscale|adblock|miniupnpd-nftables|luci-app-upnp|luci-app-adblock|luci-app-ddns|luci-app-eqos-mtk|luci-theme-aurora|luci-app-aurora-config|wireguard-tools|luci-proto-wireguard)([[:space:]]|$)' nr3053-package-manifest.txt; then
+            echo 'Unexpected optional package in firmware manifest' >&2
+            exit 1
+          fi
+          echo 'Firmware artifact:'
+          ls -lh "${images[0]}"
+      - name: Upload firmware and resolved configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: nr3053-lean-firmware
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            bin/targets/mediatek/filogic/*viettel_nr3053*.itb
+            nr3053-lean-sha256sums.txt
+            nr3053-resolved.config
+            nr3053-diffconfig.txt
+            nr3053-package-manifest.txt
+      - name: Failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nr3053-lean-build-log
+          if-no-files-found: ignore
+          path: build.log
