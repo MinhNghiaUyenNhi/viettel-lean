@@ -24,7 +24,8 @@ fi
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-echo "=== Bước 2: Sync Aurora packages (rolling) ==="
+echo "=== Bước 2: Optional Aurora packages ==="
+if [[ "${NR3053_LEAN:-0}" != "1" && "${VIETTEL_32X6_LEAN:-0}" != "1" ]]; then
 # Aurora theme + config app track upstream eamonxg HEAD so each build picks up the
 # latest release. These are single-package repos (Makefile at repo root), which the
 # buildroot feed indexer cannot handle as src-git feeds, so sync them straight into
@@ -46,6 +47,7 @@ sync_aurora_repo() {
 }
 sync_aurora_repo package/luci-theme-aurora https://github.com/eamonxg/luci-theme-aurora.git
 sync_aurora_repo package/luci-app-aurora-config https://github.com/eamonxg/luci-app-aurora-config.git
+fi
 
 echo "=== Bước 3: Áp dụng bản dịch và defaults tuỳ chỉnh ==="
 inject_po() {
@@ -58,8 +60,10 @@ inject_po() {
 }
 
 # Bản dịch tiếng Việt cho từng app (chỗ nào upstream chưa có vi)
-inject_po custom-files/vi-upnp.po \
+if [[ "${NR3053_LEAN:-0}" != "1" && "${VIETTEL_32X6_LEAN:-0}" != "1" ]]; then
+  inject_po custom-files/vi-upnp.po \
     feeds/luci/applications/luci-app-upnp/po/vi upnp.po
+fi
 inject_po custom-files/vi-turboacc.po \
     package/mtk/applications/luci-app-turboacc-mtk/po/vi turboacc.po
 inject_po custom-files/vi-mtwifi-cfg.po \
@@ -93,6 +97,7 @@ fi
 
 # UCI defaults tuỳ chỉnh Viettel (UPnP + BBR fallback)
 mkdir -p package/base-files/files/etc/uci-defaults
+if [[ "${NR3053_LEAN:-0}" != "1" && "${VIETTEL_32X6_LEAN:-0}" != "1" ]]; then
 cp custom-files/99-viettel-custom-defaults \
     package/base-files/files/etc/uci-defaults/99-viettel-custom-defaults
 echo "  Đã copy 99-viettel-custom-defaults"
@@ -112,12 +117,23 @@ if [ -f custom-files/etc/adblock/patch-reg_vn.sh ]; then
     chmod +x package/base-files/files/etc/adblock/patch-reg_vn.sh
     echo "  Đã copy etc/adblock/patch-reg_vn.sh"
 fi
+else
+  rm -f package/base-files/files/etc/uci-defaults/99-viettel-custom-defaults \
+    package/base-files/files/etc/uci-defaults/99-viettel-services-defaults \
+    package/base-files/files/etc/adblock/patch-reg_vn.sh
+fi
 
 echo "=== Bước 4: Chuẩn bị .config từ $DEFCONFIG ==="
 cp "$DEFCONFIG" .config
 make defconfig
 
-bash scripts/verify-viettel-config.sh .config
+if [[ "${NR3053_LEAN:-0}" == "1" ]]; then
+    bash scripts/verify-nr3053-lean.sh .config
+elif [[ "${VIETTEL_32X6_LEAN:-0}" == "1" ]]; then
+    bash scripts/verify-32x6-lean.sh .config
+else
+    bash scripts/verify-viettel-config.sh .config
+fi
 
 echo ""
 echo "Chuẩn bị hoàn tất. Tiếp theo:"
